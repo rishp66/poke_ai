@@ -246,6 +246,7 @@ def handle_set_selection(selected_set, cards_data):
 # Main app function
 def main():
     st.warning("Please select a set to view its cards. Scroll to the bottom once you select a set.")
+    st.greeting("Please use the tab switcher below to switch between Set Display and PokeAI.")
 
     # Get data from API
     all_sets = pd.DataFrame(Set.all())
