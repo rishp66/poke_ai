@@ -12,6 +12,7 @@ from pokemontcgsdk import Rarity
 from PIL import Image
 import json
 import time
+import re
 
 # Set page config
 st.set_page_config(
@@ -25,8 +26,18 @@ st.title("Pokemon TCG Sets Explorer")
 st.markdown("This app displays logos and symbols for Pokemon TCG sets")
 
 # Function to get API key from environment variable
-def get_api_key():
-    api_key = os.environ.get('POKEMONTCG_IO_API_KEY')
+def get_api_key_poke():
+    api_key = st.secrets.get('POKEMONTCG_IO_API_KEY')
+    if not api_key:
+        st.error("Pokémon TCG API key is not set. Please set the POKEMONTCG_IO_API_KEY environment variable.")
+    return api_key
+
+# Function to get API key for chatbot
+def get_api_key_chatbot():
+    api_key = st.secrets.get('CHATBOT_API_KEY')
+    if not api_key:
+        st.error("Chatbot API key is not set. Please set the CHATBOT_API_KEY environment variable.")
+
     return api_key
 
 
@@ -140,7 +151,7 @@ def display_cards(set_name, cards_data):
     st.header(f"Cards from {set_name}")
     
     # Create a grid layout for cards
-    num_columns = 4  # Adjust for desired grid width
+    num_columns = 4  # Adjust for grid width
     
     # Initialize session state for selected card if not exists
     if 'selected_card' not in st.session_state:
@@ -234,19 +245,120 @@ def handle_set_selection(selected_set, cards_data):
         display_cards(selected_set, cards_data)
     
     # Auto-scroll to the cards section
-    st.markdown('''
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const element = document.getElementById('cards-section');
-            element.scrollIntoView({ behavior: 'smooth' });
-        });
-    </script>
-    ''', unsafe_allow_html=True)
+    # st.markdown('''
+    # <script>
+    #     document.addEventListener('DOMContentLoaded', function() {
+    #         const element = document.getElementById('cards-section');
+    #         element.scrollIntoView({ behavior: 'smooth' });
+    #     });
+    # </script>
+    # ''', unsafe_allow_html=True)
+
+def ai_chat(prompt):
+    API_KEY = get_api_key_chatbot()
+
+    formatted_prompt = f"""
+    Based on the following request: "{prompt}"
+    
+    Please analyze what the user is asking for and categorize it into one of these request types:
+    - pokemon: If the user is asking about cards for a specific Pokemon
+    - set: If the user is asking to see all cards in a specific set
+    - total_cost: If the user is asking about the total cost of a set
+    - top_cards: If the user is asking about the most expensive cards in a set
+    
+    Respond ONLY with a JSON object in this format:
+    {{
+      "request_type": "one of [pokemon, set, total_cost, top_cards]",
+      "search_term": "the name of the Pokemon or set"
+    }}
+    
+    Do not include any explanation, just return the JSON object.
+    """
+
+    # Check if the API key is set
+    if not API_KEY:
+        st.error("Chatbot API key is not set. Please set the CHATBOT_API_KEY environment variable.")
+        return "API key not found."
+    
+    MODEL = "meta-llama/llama-4-maverick:free"
+
+    try:
+        # Make the API request
+        response = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {API_KEY}",
+                "Content-Type": "application/json",
+            },
+            data=json.dumps({
+                "model": MODEL,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": formatted_prompt
+                    }
+                ]
+            }),
+            timeout=60  # Add timeout to prevent hanging
+        )
+        
+        # Check if the request was successful
+        if response.status_code == 200:
+            response_data = response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+        else:
+            return f"Error: {response.status_code}, {response.text}"
+
+        # Parse the response
+        json_match = re.search(r'({[\s\S]*})', response_data)
+        
+        if json_match:
+            query_interpretation = json.loads(json_match.group(1))
+            
+            # Validate that the required fields are present
+            if "request_type" not in query_interpretation or "search_term" not in query_interpretation:
+                return "None of the allowed request types were found. Please try again."
+                
+            # Validate that request_type is one of the allowed values
+            allowed_types = ["pokemon", "set", "total_cost", "top_cards"]
+            if query_interpretation["request_type"] not in allowed_types:
+                return "None of the allowed request types were found. Please try again."
+                
+            return query_interpretation
+        else:
+            return "None of the allowed request types were found. Please try again."
+    
+    except Exception as e:
+        return f"An error occurred: {str(e)}"
+
+
+def parse_output(ai_content):
+    request_type = ai_content["request_type"]
+    search_term = ai_content["search_term"]
+    if request_type == "pokemon":
+        pokemon_cards = pd.DataFrame(Card.where(q=f'name:"{search_term}"'))
+        display_cards(f"Response: {search_term}", pokemon_cards)
+    elif request_type == "set":
+        set_cards = pd.DataFrame(Card.where(q=f'set.name:"{search_term}"'))
+        display_cards(f"Response: {search_term}", set_cards)
+    elif request_type == "total_cost":
+        set_cards = pd.DataFrame(Card.where(q=f'set.name:"{search_term}"'))
+        if set_cards.empty:
+            st.error(f"No cards found for set: {search_term}")
+            return
+        total_cost = set_cards['tcgplayer']['prices']['normal']['market'].sum()
+        st.success(f"The total cost of the set '{search_term}' is: ${total_cost:.2f}")
+    elif request_type == "top_cards":
+        set_cards = pd.DataFrame(Card.where(q=f'set.name:"{search_term}"'))
+        if set_cards.empty:
+            st.error(f"No cards found for set: {search_term}")
+            return
+        top_cards = set_cards.sort_values(by=tcgplayer['prices']['normal']['market'], ascending=False).head(10)
+        display_cards(f"Top 10 most expensive cards in {search_term}", top_cards)
 
 # Main app function
 def main():
     st.warning("Please select a set to view its cards. Scroll to the bottom once you select a set.")
-    st.info("Please use the tab switcher below to switch between Set Display and PokeAI! PokeAI is currently under development.")
+    st.info("Please use the tab switcher below to switch between Set Display and PokeAI!")
 
     # Get data from API
     all_sets = pd.DataFrame(Set.all())
@@ -273,7 +385,25 @@ def main():
             pass
     
     with tab2:
-        st.info("PokeAI cards feature coming soon!")
+        st.markdown("""
+        # PokeAI: Your Pokemon TCG Assistant
+        
+        Ask any of the following:
+        - "What is the total cost of [Set]?"
+        - "What are the top 10 most expensive card in [Set]?"
+        - "What are all the cards in [Set]?"
+        - "What are all the cards for [Pokemon]?"
+        """)
+        user_message = st.text_area("Your message:", height=100)
+
+        if st.button("Send"):
+            if not user_message:
+                st.error("Please enter a message.")
+            else:
+                with st.spinner("Getting response..."):
+                    ai_response = ai_chat(user_message)
+                    st.markdown("### Response:")
+                    st.write(parse_output(ai_response))
     # Add a footer
     st.markdown("---")
     st.markdown("Powered by Pokémon TCG API")
@@ -281,3 +411,5 @@ def main():
 # Run the app
 if __name__ == "__main__":
     main()
+
+
