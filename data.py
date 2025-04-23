@@ -345,15 +345,46 @@ def parse_output(ai_content):
         if set_cards.empty:
             st.error(f"No cards found for set: {search_term}")
             return
-        total_cost = set_cards['tcgplayer']['prices']['normal']['market'].sum()
+        total_cost = set_cards['tcgplayer'].apply(lambda x: extract_card_price(x)).sum()
         st.success(f"The total cost of the set '{search_term}' is: ${total_cost:.2f}")
     elif request_type == "top_cards":
         set_cards = pd.DataFrame(Card.where(q=f'set.name:"{search_term}"'))
         if set_cards.empty:
             st.error(f"No cards found for set: {search_term}")
             return
-        top_cards = set_cards.sort_values(by=tcgplayer['prices']['normal']['market'], ascending=False).head(10)
+        # Sort by market price and get top 10
+        set_cards['price'] = set_cards['tcgplayer'].apply(lambda x: extract_card_price(x))
+        top_cards = set_cards.sort_values(by='price', ascending=False).head(10)
         display_cards(f"Top 10 most expensive cards in {search_term}", top_cards)
+
+
+def extract_card_price(card_price):
+    if isinstance(card_price, str):
+        try:
+            card_price = json.loads(card_price)
+        except json.JSONDecodeError:
+            return "Invalid price data"
+    
+    try:
+        # Parse the embedded json
+        if 'prices' in card_price:
+            prices = card_price['prices']
+            
+            # Check for different price categories
+            if 'holofoil' in prices and prices['holofoil'] and 'market' in prices['holofoil']:
+                return float(prices['holofoil']['market'])
+            elif 'normal' in prices and prices['normal'] and 'market' in prices['normal']:
+                return float(prices['normal']['market'])
+            elif 'reverseHolofoil' in prices and prices['reverseHolofoil'] and 'market' in prices['reverseHolofoil']:
+                return float(prices['reverseHolofoil']['market'])
+            else:
+                # Try for any other category that has value
+                for price_type in prices:
+                    if isinstance(prices[price_type], dict) and 'market' in prices[price_type]:
+                        return float(prices[price_type]['market'])
+    except Exception as e:
+        st.error(f"Error extracting price: {str(e)}")
+    
 
 # Main app function
 def main():
