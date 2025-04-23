@@ -1,7 +1,5 @@
 # Pokemon TCG Explorer
 
-![Pokemon TCG Logo](https://pokemontcg.io/static/media/logo.3b4370bb.svg)
-
 ## 🚀 Live Demo
 
 Check out the live application: [https://poketcgai.streamlit.app/](https://poketcgai.streamlit.app/)
