@@ -23,7 +23,7 @@ st.set_page_config(
 
 # App title and description
 st.title("Pokemon TCG Sets Explorer")
-st.markdown("This app displays logos and symbols for Pokemon TCG sets")
+st.markdown("This app displays data and for Pokemon TCG sets with an AI assistant to help you find cards and sets.")
 
 # Function to get API key from environment variable
 def get_api_key_poke():
