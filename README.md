@@ -97,8 +97,8 @@ pokemon-tcg-explorer/
 ## 👤 Contact
 
 For questions or feedback, please reach out via:
-- GitHub: [@yourusername](https://github.com/rishp66)
-- LinkedIn: [Your Name](https://www.linkedin.com/in/rish-pednekar/)
+- GitHub: [@rishp66](https://github.com/rishp66)
+- LinkedIn: [Rish Pednekar](https://www.linkedin.com/in/rish-pednekar/)
 
 ---
 
