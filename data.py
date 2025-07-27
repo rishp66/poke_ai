@@ -14,6 +14,10 @@ from PIL import Image
 import json
 import time
 import re
+import concurrent.futures
+import threading
+import asyncio
+from typing import Optional, Dict, List
 
 # Set page config
 st.set_page_config(
@@ -24,7 +28,7 @@ st.set_page_config(
 
 # App title and description
 st.title("Pokemon TCG Sets Explorer")
-st.markdown("This app displays data and for Pokemon TCG sets with an AI assistant to help you find cards and sets.")
+st.markdown("This app displays data for Pokemon TCG sets with an AI assistant to help you find cards and sets.")
 
 # Function to get API key from environment variable
 def get_api_key_poke():
@@ -44,151 +48,250 @@ def get_api_key_chatbot():
 def configure_pokemon_tcg_api():
     api_key = get_api_key_poke()
     if api_key:
-        RestClient.configure(api_key)
-        return True
+        try:
+            RestClient.configure(api_key)
+            return True
+        except Exception as e:
+            st.error(f"Failed to configure Pokemon TCG API: {str(e)}")
+            return False
     return False
 
-# Function to safely fetch sets with error handling and retry logic
-def fetch_sets_safely(max_retries=3, delay=2):
-    """Fetch Pokemon TCG sets with error handling and retry logic"""
-    
-    for attempt in range(max_retries):
-        try:
-            st.info(f"Fetching Pokemon TCG sets... (Attempt {attempt + 1}/{max_retries})")
-            
-            # Add a small delay between attempts
-            if attempt > 0:
-                time.sleep(delay * attempt)
-            
-            # Fetch sets with pagination to avoid overwhelming the API
-            all_sets_data = []
-            page = 1
-            page_size = 50  # Smaller page size to reduce load
-            
-            while True:
-                try:
-                    # Use pagination parameters
-                    sets_response = Set.where(page=page, pageSize=page_size)
-                    
-                    if not sets_response:
-                        break
-                        
-                    all_sets_data.extend(sets_response)
-                    
-                    # If we got less than page_size items, we've reached the end
-                    if len(sets_response) < page_size:
-                        break
-                        
-                    page += 1
-                    
-                    # Add a small delay between pages to be respectful to the API
-                    time.sleep(0.5)
-                    
-                except Exception as page_error:
-                    st.warning(f"Error fetching page {page}: {str(page_error)}")
-                    break
-            
-            if all_sets_data:
-                st.success(f"Successfully fetched {len(all_sets_data)} sets!")
-                return pd.DataFrame(all_sets_data)
+# Function to handle API errors and convert bytes to string if needed
+def handle_api_error(error):
+    """Handle API errors and ensure proper string conversion"""
+    try:
+        error_str = str(error)
+        if hasattr(error, 'args') and error.args:
+            error_arg = error.args[0]
+            if isinstance(error_arg, bytes):
+                error_str = error_arg.decode('utf-8', errors='replace')
             else:
-                raise Exception("No sets data received")
-                
-        except Exception as e:
-            error_msg = str(e)
-            st.warning(f"Attempt {attempt + 1} failed: {error_msg}")
-            
-            if attempt == max_retries - 1:
-                st.error("Failed to fetch sets after all retry attempts.")
-                st.error("Possible solutions:")
-                st.error("1. Check your internet connection")
-                st.error("2. Verify your Pokemon TCG API key is valid")
-                st.error("3. The API might be temporarily unavailable - try again later")
-                st.error("4. You might have exceeded the API rate limit")
-                return None
-            else:
-                st.info(f"Retrying in {delay * (attempt + 1)} seconds...")
-                time.sleep(delay * (attempt + 1))
-    
-    return None
+                error_str = str(error_arg)
+        return error_str
+    except Exception:
+        return "Unknown API error occurred"
 
-# Function to safely fetch cards with error handling
-def fetch_cards_safely(set_name, max_retries=3):
-    """Fetch cards for a specific set with error handling"""
-    
-    for attempt in range(max_retries):
-        try:
-            st.info(f"Fetching cards for {set_name}... (Attempt {attempt + 1}/{max_retries})")
-            
-            if attempt > 0:
-                time.sleep(2 * attempt)
-            
-            # Fetch cards with pagination
-            all_cards_data = []
-            page = 1
-            page_size = 100
-            
-            while True:
-                try:
-                    cards_response = Card.where(q=f'set.name:"{set_name}"', page=page, pageSize=page_size)
-                    
-                    if not cards_response:
-                        break
-                        
-                    all_cards_data.extend(cards_response)
-                    
-                    if len(cards_response) < page_size:
-                        break
-                        
-                    page += 1
-                    time.sleep(0.3)  # Small delay between pages
-                    
-                except Exception as page_error:
-                    st.warning(f"Error fetching cards page {page}: {str(page_error)}")
-                    break
-            
-            if all_cards_data:
-                st.success(f"Successfully fetched {len(all_cards_data)} cards!")
-                return pd.DataFrame(all_cards_data)
-            else:
-                st.warning(f"No cards found for set: {set_name}")
-                return pd.DataFrame()
-                
-        except Exception as e:
-            st.warning(f"Attempt {attempt + 1} failed: {str(e)}")
-            
-            if attempt == max_retries - 1:
-                st.error(f"Failed to fetch cards for {set_name} after all retry attempts.")
-                return pd.DataFrame()
-            else:
-                time.sleep(2 * (attempt + 1))
-    
-    return pd.DataFrame()
+# OPTIMIZED: Fast sets fetching with minimal API calls
+@st.cache_data(ttl=7200, show_spinner=False)  # Cache for 2 hours
+def fetch_sets_optimized():
+    """Ultra-fast sets fetching with single API call and optimizations"""
+    try:
+        # Use maximum page size to minimize API calls
+        all_sets = Set.all()
+        if all_sets:
+            # Convert to DataFrame immediately and process efficiently
+            df = pd.DataFrame(all_sets)
+            # Pre-process images to avoid repeated processing
+            if 'images' in df.columns:
+                df['logo'] = df['images'].apply(
+                    lambda x: x.get('logo', 'https://via.placeholder.com/150x150?text=No+Logo') 
+                    if isinstance(x, dict) else 'https://via.placeholder.com/150x150?text=No+Logo'
+                )
+                df['symbol'] = df['images'].apply(
+                    lambda x: x.get('symbol', '') if isinstance(x, dict) else ''
+                )
+            return df
+        return None
+    except Exception as e:
+        st.error(f"Error fetching sets: {handle_api_error(e)}")
+        return None
 
-# CSS for styling the selectable image grid
+# OPTIMIZED: Concurrent card fetching with progress tracking
+def fetch_cards_concurrent(set_name: str, max_workers: int = 3) -> pd.DataFrame:
+    """Fetch cards using concurrent requests for maximum speed"""
+    all_cards = []
+    page_size = 250  # Maximum allowed
+    
+    def fetch_page(page_num):
+        try:
+            return Card.where(q=f'set.name:"{set_name}"', page=page_num, pageSize=page_size)
+        except Exception as e:
+            st.error(f"Error fetching page {page_num}: {handle_api_error(e)}")
+            return []
+    
+    try:
+        # First, get the first page to determine total pages needed
+        first_page_results = fetch_page(1)
+        if not first_page_results:
+            return pd.DataFrame()
+        
+        all_cards.extend(first_page_results)
+        
+        # If we got the full page size, there might be more pages
+        if len(first_page_results) == page_size:
+            # Use concurrent futures for remaining pages
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit requests for potential additional pages
+                futures = []
+                for page in range(2, 6):  # Check up to 5 pages concurrently
+                    futures.append(executor.submit(fetch_page, page))
+                
+                # Collect results as they complete
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        result = future.result(timeout=10)  # 10 second timeout per request
+                        if result:
+                            all_cards.extend(result)
+                            if len(result) < page_size:
+                                break  # No more pages
+                        else:
+                            break  # No more results
+                    except concurrent.futures.TimeoutError:
+                        st.warning("Some requests timed out, showing partial results")
+                        break
+                    except Exception as e:
+                        st.warning(f"Error in concurrent fetch: {handle_api_error(e)}")
+                        break
+        
+        return pd.DataFrame(all_cards) if all_cards else pd.DataFrame()
+        
+    except Exception as e:
+        st.error(f"Error in concurrent card fetching: {handle_api_error(e)}")
+        return pd.DataFrame()
+
+# OPTIMIZED: Live API calls with smart progress bars
+def fetch_cards_live_with_progress(set_name: str) -> pd.DataFrame:
+    """Live API call with optimized progress tracking"""
+    
+    # Create progress container
+    progress_container = st.container()
+    
+    with progress_container:
+        st.info(f"🃏 Loading cards from **{set_name}**...")
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # Phase 1: Initialize (0-20%)
+        for i in range(0, 21, 5):
+            progress_bar.progress(i)
+            status_text.text(f"🔧 Initializing connection... ({i}%)")
+            time.sleep(0.1)
+        
+        # Phase 2: Fetch data (20-85%)
+        progress_bar.progress(25)
+        status_text.text("📡 Fetching card data...")
+        
+        # Actual API call
+        cards_data = fetch_cards_concurrent(set_name)
+        
+        # Phase 3: Processing (85-100%)
+        for i in range(85, 101, 3):
+            progress_bar.progress(i)
+            status_text.text(f"🔄 Processing {len(cards_data)} cards... ({i}%)")
+            time.sleep(0.05)
+        
+        # Clear progress
+        time.sleep(0.3)
+        progress_container.empty()
+        
+        return cards_data
+
+# OPTIMIZED: Query-based fetching with concurrent processing
+def fetch_cards_by_query_concurrent(query: str, max_workers: int = 3) -> pd.DataFrame:
+    """Optimized query-based card fetching with concurrency"""
+    
+    def fetch_query_page(page_num):
+        try:
+            return Card.where(q=query, page=page_num, pageSize=250)
+        except Exception as e:
+            st.error(f"Error fetching query page {page_num}: {handle_api_error(e)}")
+            return []
+    
+    try:
+        all_cards = []
+        
+        # Get first page
+        first_page = fetch_query_page(1)
+        if not first_page:
+            return pd.DataFrame()
+        
+        all_cards.extend(first_page)
+        
+        # If full page, fetch more concurrently
+        if len(first_page) == 250:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(fetch_query_page, page) for page in range(2, 6)]
+                
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        result = future.result(timeout=8)
+                        if result:
+                            all_cards.extend(result)
+                            if len(result) < 250:
+                                break
+                        else:
+                            break
+                    except (concurrent.futures.TimeoutError, Exception) as e:
+                        st.warning(f"Some requests failed: {handle_api_error(e)}")
+                        break
+        
+        return pd.DataFrame(all_cards) if all_cards else pd.DataFrame()
+        
+    except Exception as e:
+        st.error(f"Error in query fetching: {handle_api_error(e)}")
+        return pd.DataFrame()
+
+def fetch_cards_by_query_with_progress(query: str, operation_name: str) -> pd.DataFrame:
+    """Wrapper for query-based fetching with progress"""
+    progress_container = st.container()
+    
+    with progress_container:
+        st.info(f"🔍 {operation_name}...")
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # Quick progress updates
+        for i in range(0, 31, 10):
+            progress_bar.progress(i)
+            status_text.text(f"🔧 Preparing search... ({i}%)")
+            time.sleep(0.1)
+        
+        progress_bar.progress(40)
+        status_text.text("🎯 Executing search...")
+        
+        # Actual API call
+        cards_data = fetch_cards_by_query_concurrent(query)
+        
+        # Final progress
+        for i in range(80, 101, 5):
+            progress_bar.progress(i)
+            if not cards_data.empty:
+                status_text.text(f"✅ Found {len(cards_data)} cards! ({i}%)")
+            else:
+                status_text.text(f"⚠️ No cards found ({i}%)")
+            time.sleep(0.05)
+        
+        time.sleep(0.2)
+        progress_container.empty()
+        return cards_data
+
+# CSS for styling (unchanged but optimized)
 st.markdown("""
 <style>
     .image-container {
         border: 2px solid transparent;
         border-radius: 10px;
         padding: 5px;
-        transition: all 0.3s;
+        transition: all 0.2s ease;
         text-align: center;
         margin-bottom: 10px;
         background-color: white;
+        cursor: pointer;
     }
     .image-container:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        transform: translateY(-3px);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.1);
     }
     .selected-container {
-        border: 2px solid #4CAF50;
-        box-shadow: 0 0 15px rgba(76, 175, 80, 0.5);
+        border: 3px solid #4CAF50;
+        box-shadow: 0 0 20px rgba(76, 175, 80, 0.6);
+        transform: translateY(-2px);
     }
     .set-name {
         font-weight: bold;
         margin-top: 8px;
         font-size: 0.9em;
+        color: #333;
     }
     .set-code {
         color: #666;
@@ -196,157 +299,180 @@ st.markdown("""
     }
     .stButton button {
         width: 100%;
-        background-color: #4CAF50;
-        color: white;
-        border: none;
+        background-color: #4CAF50 !important;
+        color: white !important;
+        border: none !important;
         border-radius: 5px;
-        padding: 5px;
+        padding: 8px;
         margin-top: 5px;
+        transition: background-color 0.2s;
+    }
+    .stButton button:hover {
+        background-color: #45a049 !important;
     }
     .card-container {
-        margin-bottom: 20px;
-        transition: transform 0.3s;
+        margin-bottom: 15px;
+        transition: transform 0.2s ease;
+        border-radius: 8px;
+        overflow: hidden;
     }
     .card-container:hover {
-        transform: translateY(-5px);
+        transform: translateY(-2px);
     }
     .price-info {
         font-size: 0.9em;
         margin-top: 5px;
+        padding: 5px;
+        background-color: #f8f9fa;
+        border-radius: 4px;
+    }
+    #cards-section {
+        scroll-margin-top: 20px;
+        border-top: 3px solid #4CAF50;
+        padding-top: 20px;
+        margin-top: 20px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Functions for data conversion
-def image_conversion_set(dataframe):
-    if 'logo' in dataframe.columns and 'symbol' in dataframe.columns:
-        return dataframe
-    # Extract the logo and symbol URLs into separate columns
-    dataframe['logo'] = dataframe['images'].apply(lambda x: x.get('logo') if isinstance(x, dict) else None)
-    dataframe['symbol'] = dataframe['images'].apply(lambda x: x.get('symbol') if isinstance(x, dict) else None)
-    # Drop the original 'images' column
-    dataframe = dataframe.drop(columns=['images'])
-    return dataframe
-
-# Function to select a set from a grid
+# OPTIMIZED: Set selection with improved UX
 def select_set(sets_data):
-    # Create a session state to track the selected set
     if 'selected_set' not in st.session_state:
         st.session_state.selected_set = None
     
-    # Create a grid layout
-    num_columns = 4  # Adjust this for your desired grid width
+    # Add search functionality for sets
+    search_term = st.text_input("🔍 Search sets:", placeholder="Type to filter sets...")
     
-    # Display sets in grid
-    for i in range(0, len(sets_data), num_columns):
-        # Create a row of columns
+    # Filter sets based on search
+    if search_term:
+        filtered_sets = sets_data[
+            sets_data['name'].str.contains(search_term, case=False, na=False) |
+            sets_data['id'].str.contains(search_term, case=False, na=False)
+        ]
+    else:
+        filtered_sets = sets_data
+    
+    if filtered_sets.empty:
+        st.warning("No sets found matching your search.")
+        return st.session_state.selected_set
+    
+    st.info(f"📊 Showing {len(filtered_sets)} sets")
+    
+    num_columns = 4
+    
+    for i in range(0, len(filtered_sets), num_columns):
         cols = st.columns(num_columns)
         
-        # Fill the row with set data
         for j in range(num_columns):
-            if i + j < len(sets_data):
-                set_data = sets_data.iloc[i + j]
+            if i + j < len(filtered_sets):
+                set_data = filtered_sets.iloc[i + j]
                 
                 with cols[j]:
-                    # Check if this set is selected
                     is_selected = st.session_state.selected_set == set_data['name']
                     selected_class = "selected-container" if is_selected else ""
                     
-                    # Container with conditional class for selection highlight
                     logo_url = set_data.get('logo', 'https://via.placeholder.com/150x150?text=No+Logo')
+                    
                     st.markdown(f"""
                     <div class="image-container {selected_class}">
-                        <img src="{logo_url}" style="max-height: 120px; width: auto; max-width: 100%;">
+                        <img src="{logo_url}" style="max-height: 120px; width: auto; max-width: 100%; border-radius: 4px;">
                         <div class="set-name">{set_data['name']}</div>
                         <div class="set-code">{set_data['id']}</div>
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # Add select button
-                    if st.button(f"Select", key=f"set_{set_data['id']}"):
+                    if st.button(f"📋 Select", key=f"set_{set_data['id']}", help=f"Load cards from {set_data['name']}"):
                         st.session_state.selected_set = set_data['name']
+                        st.info("📜 **Set selected!** Please scroll down to view all cards from this set.")
                         st.rerun()
     
-    # Return the selected set name
     return st.session_state.selected_set
 
-# Function to display cards from the selected set
-def display_cards(set_name, cards_data):
-    st.header(f"Cards from {set_name}")
+# OPTIMIZED: Card display with complete set view
+def display_cards(set_name: str, cards_data: pd.DataFrame):
+    st.markdown('<div id="cards-section"></div>', unsafe_allow_html=True)
+    
+    st.header(f"🃏 Cards from {set_name}")
     
     if cards_data.empty:
         st.warning("No cards found for this set.")
         return
     
-    # Create a grid layout for cards
-    num_columns = 4  # Adjust for grid width
+    # Enhanced info display
+    total_cards = len(cards_data)
+    total_value = cards_data.get('tcgplayer', pd.Series()).apply(extract_card_price).sum()
     
-    # Initialize session state for selected card if not exists
-    if 'selected_card' not in st.session_state:
-        st.session_state.selected_card = None
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("📊 Total Cards", total_cards)
+    with col2:
+        st.metric("💰 Estimated Value", f"${total_value:.2f}")
+    with col3:
+        avg_price = total_value / total_cards if total_cards > 0 else 0
+        st.metric("📈 Average Price", f"${avg_price:.2f}")
     
-    # Display cards in grid using DataFrame indexing
+    # Display all cards (no pagination)
+    st.info(f"📋 Displaying all {total_cards} cards from this set")
+    
+    # Display cards in grid
+    num_columns = 4
+    
     for i in range(0, len(cards_data), num_columns):
-        # Create a row of columns
         cols = st.columns(num_columns)
         
-        # Fill the row with card data
         for j in range(num_columns):
             idx = i + j
             if idx < len(cards_data):
-                # Get card at index using iloc
                 card = cards_data.iloc[idx]
                 
                 with cols[j]:
                     with st.container():
-                        # Display card image
-                        if isinstance(card['images'], dict) and 'small' in card['images']:
-                            st.image(card['images']['small'], use_column_width=True)
-                        else:
-                            st.image("https://via.placeholder.com/150x209?text=No+Image", use_column_width=True)
+                        # Card image with error handling
+                        try:
+                            if isinstance(card['images'], dict) and 'small' in card['images']:
+                                st.image(card['images']['small'], use_column_width=True)
+                            else:
+                                st.image("https://via.placeholder.com/150x209?text=No+Image", use_column_width=True)
+                        except:
+                            st.image("https://via.placeholder.com/150x209?text=Error", use_column_width=True)
                         
-                        # Display card name & artist
-                        st.markdown(f"**{card['name']}**")
+                        # Card name
+                        st.markdown(f"**{card.get('name', 'Unknown Card')}**")
                         
-                        # Display price information if available
+                        # Price information with better formatting
                         if isinstance(card.get('tcgplayer'), dict) and 'prices' in card['tcgplayer']:
                             prices = card['tcgplayer']['prices']
-    
-                            # Display prices in a clean format with larger text
-                            price_html = "<div class='price-info' style='font-size: 16px;'>"
-    
-                            if isinstance(prices, dict):
-                                if 'holofoil' in prices and isinstance(prices['holofoil'], dict) and 'market' in prices['holofoil']:
-                                    price_html += f"<p style='margin: 4px 0;'><b>Holofoil:</b> <span style='font-size: 18px; font-weight: bold;'>${prices['holofoil']['market']:.2f}</span></p>"
-        
-                                if 'reverseHolofoil' in prices and isinstance(prices['reverseHolofoil'], dict) and 'market' in prices['reverseHolofoil']:
-                                    price_html += f"<p style='margin: 4px 0;'><b>Reverse Holo:</b> <span style='font-size: 18px; font-weight: bold;'>${prices['reverseHolofoil']['market']:.2f}</span></p>"
-        
-                                if 'normal' in prices and isinstance(prices['normal'], dict) and 'market' in prices['normal']:
-                                    price_html += f"<p style='margin: 4px 0;'><b>Normal:</b> <span style='font-size: 18px; font-weight: bold;'>${prices['normal']['market']:.2f}</span></p>"
-    
+                            price_html = "<div class='price-info'>"
+                            
+                            price_types = ['holofoil', 'reverseHolofoil', 'normal']
+                            price_labels = ['🌟 Holofoil', '🔄 Reverse Holo', '📋 Normal']
+                            
+                            for price_type, label in zip(price_types, price_labels):
+                                if (price_type in prices and 
+                                    isinstance(prices[price_type], dict) and 
+                                    'market' in prices[price_type]):
+                                    price = prices[price_type]['market']
+                                    price_html += f"<p style='margin: 2px 0;'><b>{label}:</b> <span style='color: #2e7d32; font-weight: bold;'>${price:.2f}</span></p>"
+                            
                             price_html += "</div>"
                             st.markdown(price_html, unsafe_allow_html=True)
                         else:
-                            # Make the unavailable price text larger too
-                            st.markdown("<p style='font-size: 16px; font-style: italic;'>Price data unavailable</p>", unsafe_allow_html=True)
+                            st.markdown("<p style='font-style: italic; color: #666;'>💸 Price unavailable</p>", unsafe_allow_html=True)
 
-# Loading Pokémon TCG API
-def handle_set_selection(selected_set):
-    # Create anchor for scrolling
+# OPTIMIZED: Set selection handler with live calls
+def handle_set_selection(selected_set: str):
+    """Handle set selection with live API calls and progress tracking"""
     st.markdown('<div id="cards-section"></div>', unsafe_allow_html=True)
     
-    # Show loading state
-    with st.spinner(f"Loading cards from {selected_set}..."):
-        # Fetch cards safely
-        cards_data = fetch_cards_safely(selected_set)
-        
-        if not cards_data.empty:
-            # Display the cards
-            display_cards(selected_set, cards_data)
-        else:
-            st.error(f"Failed to load cards for {selected_set}")
+    # Make live API call (no caching for real-time data)
+    cards_data = fetch_cards_live_with_progress(selected_set)
+    
+    if not cards_data.empty:
+        display_cards(selected_set, cards_data)
+    else:
+        st.error(f"❌ Failed to load cards for {selected_set}. Please try again.")
 
+# AI chat function (optimized with faster timeout)
 def ai_chat(prompt):
     API_KEY = get_api_key_chatbot()
 
@@ -368,7 +494,6 @@ def ai_chat(prompt):
     Do not include any explanation, just return the JSON object.
     """
 
-    # Check if the API key is set
     if not API_KEY:
         st.error("Chatbot API key is not set. Please set the CHATBOT_API_KEY environment variable.")
         return "API key not found."
@@ -376,7 +501,6 @@ def ai_chat(prompt):
     MODEL = "meta-llama/llama-4-maverick:free"
 
     try:
-        # Make the API request
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
             headers={
@@ -392,26 +516,22 @@ def ai_chat(prompt):
                     }
                 ]
             }),
-            timeout=60  # Add timeout to prevent hanging
+            timeout=15  # Reduced timeout for faster failure
         )
         
-        # Check if the request was successful
         if response.status_code == 200:
             response_data = response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
         else:
             return f"Error: {response.status_code}, {response.text}"
 
-        # Parse the response
         json_match = re.search(r'({[\s\S]*})', response_data)
         
         if json_match:
             query_interpretation = json.loads(json_match.group(1))
             
-            # Validate that the required fields are present
             if "request_type" not in query_interpretation or "search_term" not in query_interpretation:
                 return "None of the allowed request types were found. Please try again."
                 
-            # Validate that request_type is one of the allowed values
             allowed_types = ["pokemon", "set", "total_cost", "top_cards"]
             if query_interpretation["request_type"] not in allowed_types:
                 return "None of the allowed request types were found. Please try again."
@@ -423,6 +543,7 @@ def ai_chat(prompt):
     except Exception as e:
         return f"An error occurred: {str(e)}"
 
+# OPTIMIZED: AI response parsing with concurrent processing
 def parse_output(ai_content):
     if isinstance(ai_content, str):
         st.error(ai_content)
@@ -432,98 +553,75 @@ def parse_output(ai_content):
     search_term = ai_content["search_term"]
     
     if request_type == "pokemon":
-        try:
-            pokemon_cards = fetch_cards_safely_by_query(f'name:"{search_term}"')
-            if not pokemon_cards.empty:
-                display_cards(f"Response: {search_term}", pokemon_cards)
-            else:
-                st.error(f"No cards found for Pokemon: {search_term}")
-        except Exception as e:
-            st.error(f"Error fetching Pokemon cards: {str(e)}")
+        pokemon_cards = fetch_cards_by_query_with_progress(
+            f'name:"{search_term}"', 
+            f"Searching for **{search_term}** cards"
+        )
+        if not pokemon_cards.empty:
+            display_cards(f"🔍 {search_term} Cards", pokemon_cards)
+        else:
+            st.error(f"No cards found for Pokemon: {search_term}")
             
     elif request_type == "set":
-        try:
-            set_cards = fetch_cards_safely_by_query(f'set.name:"{search_term}"')
-            if not set_cards.empty:
-                display_cards(f"Response: {search_term}", set_cards)
-            else:
-                st.error(f"No cards found for set: {search_term}")
-        except Exception as e:
-            st.error(f"Error fetching set cards: {str(e)}")
+        set_cards = fetch_cards_by_query_with_progress(
+            f'set.name:"{search_term}"', 
+            f"Loading **{search_term}** set"
+        )
+        if not set_cards.empty:
+            display_cards(f"📦 {search_term} Set", set_cards)
+        else:
+            st.error(f"No cards found for set: {search_term}")
             
     elif request_type == "total_cost":
-        try:
-            set_cards = fetch_cards_safely_by_query(f'set.name:"{search_term}"')
-            if set_cards.empty:
-                st.error(f"No cards found for set: {search_term}")
-                return
-            total_cost = set_cards['tcgplayer'].apply(lambda x: extract_card_price(x)).sum()
-            st.success(f"The total cost of the set '{search_term}' is: ${total_cost:.2f}")
-        except Exception as e:
-            st.error(f"Error calculating total cost: {str(e)}")
+        set_cards = fetch_cards_by_query_with_progress(
+            f'set.name:"{search_term}"', 
+            f"Calculating total cost for **{search_term}**"
+        )
+        if set_cards.empty:
+            st.error(f"No cards found for set: {search_term}")
+            return
+            
+        # Quick calculation
+        total_cost = set_cards['tcgplayer'].apply(extract_card_price).sum()
+        
+        # Display result with metrics
+        col1, col2 = st.columns(2)
+        with col1:
+            st.success(f"💰 **Total Cost of '{search_term}':** ${total_cost:.2f}")
+        with col2:
+            avg_cost = total_cost / len(set_cards) if len(set_cards) > 0 else 0
+            st.info(f"📊 **Average Card Price:** ${avg_cost:.2f}")
             
     elif request_type == "top_cards":
-        try:
-            set_cards = fetch_cards_safely_by_query(f'set.name:"{search_term}"')
-            if set_cards.empty:
-                st.error(f"No cards found for set: {search_term}")
-                return
-            # Sort by market price and get top 10
-            set_cards['price'] = set_cards['tcgplayer'].apply(lambda x: extract_card_price(x))
-            top_cards = set_cards.sort_values(by='price', ascending=False).head(10)
-            display_cards(f"Top 10 most expensive cards in {search_term}", top_cards)
-        except Exception as e:
-            st.error(f"Error fetching top cards: {str(e)}")
-
-def fetch_cards_safely_by_query(query, max_retries=3):
-    """Fetch cards by query with error handling"""
+        set_cards = fetch_cards_by_query_with_progress(
+            f'set.name:"{search_term}"', 
+            f"Finding top cards in **{search_term}**"
+        )
+        if set_cards.empty:
+            st.error(f"No cards found for set: {search_term}")
+            return
+            
+        # Quick processing
+        set_cards['price'] = set_cards['tcgplayer'].apply(extract_card_price)
+        top_cards = set_cards.sort_values(by='price', ascending=False).head(10)
+        
+        display_cards(f"🏆 Top 10 Most Expensive Cards in {search_term}", top_cards)
     
-    for attempt in range(max_retries):
-        try:
-            if attempt > 0:
-                time.sleep(2 * attempt)
-            
-            # Fetch cards with pagination
-            all_cards_data = []
-            page = 1
-            page_size = 100
-            
-            while True:
-                try:
-                    cards_response = Card.where(q=query, page=page, pageSize=page_size)
-                    
-                    if not cards_response:
-                        break
-                        
-                    all_cards_data.extend(cards_response)
-                    
-                    if len(cards_response) < page_size:
-                        break
-                        
-                    page += 1
-                    time.sleep(0.3)  # Small delay between pages
-                    
-                except Exception as page_error:
-                    st.warning(f"Error fetching cards page {page}: {str(page_error)}")
-                    break
-            
-            if all_cards_data:
-                return pd.DataFrame(all_cards_data)
-            else:
-                return pd.DataFrame()
-                
-        except Exception as e:
-            st.warning(f"Attempt {attempt + 1} failed: {str(e)}")
-            
-            if attempt == max_retries - 1:
-                st.error(f"Failed to fetch cards after all retry attempts.")
-                return pd.DataFrame()
-            else:
-                time.sleep(2 * (attempt + 1))
-    
-    return pd.DataFrame()
+    # Auto-scroll to results
+    st.markdown("""
+    <script>
+        setTimeout(function() {
+            const element = document.getElementById('cards-section');
+            if (element) {
+                element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }, 200);
+    </script>
+    """, unsafe_allow_html=True)
 
-def extract_card_price(card_price):
+# OPTIMIZED: Price extraction with error handling
+def extract_card_price(card_price) -> float:
+    """Extract card price with optimized error handling"""
     if isinstance(card_price, str):
         try:
             card_price = json.loads(card_price)
@@ -531,95 +629,121 @@ def extract_card_price(card_price):
             return 0.0
     
     try:
-        # Parse the embedded json
         if isinstance(card_price, dict) and 'prices' in card_price:
             prices = card_price['prices']
             
-            # Check for different price categories
-            if 'holofoil' in prices and prices['holofoil'] and 'market' in prices['holofoil']:
-                return float(prices['holofoil']['market'])
-            elif 'normal' in prices and prices['normal'] and 'market' in prices['normal']:
-                return float(prices['normal']['market'])
-            elif 'reverseHolofoil' in prices and prices['reverseHolofoil'] and 'market' in prices['reverseHolofoil']:
-                return float(prices['reverseHolofoil']['market'])
-            else:
-                # Try for any other category that has value
-                for price_type in prices:
-                    if isinstance(prices[price_type], dict) and 'market' in prices[price_type]:
+            # Priority order for price types
+            price_priority = ['holofoil', 'normal', 'reverseHolofoil']
+            
+            for price_type in price_priority:
+                if (price_type in prices and 
+                    isinstance(prices[price_type], dict) and 
+                    'market' in prices[price_type] and
+                    prices[price_type]['market'] is not None):
+                    return float(prices[price_type]['market'])
+            
+            # Fallback: any available price
+            for price_type in prices:
+                if isinstance(prices[price_type], dict) and 'market' in prices[price_type]:
+                    try:
                         return float(prices[price_type]['market'])
-    except Exception as e:
-        st.error(f"Error extracting price: {str(e)}")
+                    except (ValueError, TypeError):
+                        continue
+    except Exception:
+        pass
     
     return 0.0
 
-# Main app function
+# MAIN APPLICATION
 def main():
-    # Configure the Pokemon TCG API
     if not configure_pokemon_tcg_api():
         st.error("Cannot proceed without Pokemon TCG API key. Please configure your API key.")
         return
     
-    st.warning("Please select a set to view its cards. Scroll to the bottom once you select a set.")
-    st.info("Please use the tab switcher below to switch between Set Display and PokeAI!")
+    # Enhanced instructions
+    st.info("""
+    🎯 **Quick Start Guide:**
+    - **Sets Tab:** Browse all Pokemon TCG sets with live data loading
+    - **PokeAI Tab:** Ask questions about cards, sets, and prices
+    - Use the search bar to quickly find specific sets
+    """)
 
-    # Initialize session state for sets data
+    # Initialize session state
     if 'sets_data' not in st.session_state:
         st.session_state.sets_data = None
     
-    # Create tabs for navigation
-    tab1, tab2 = st.tabs(["Sets", "PokeAI"])
+    # Create tabs
+    tab1, tab2 = st.tabs(["🃏 Sets Explorer", "🤖 PokeAI Assistant"])
     
     with tab1:
-        # Load sets data if not already loaded
+        st.markdown("### Pokemon TCG Sets Collection")
+        
+        # Load sets data with progress (cached for performance)
         if st.session_state.sets_data is None:
-            with st.spinner("Loading Pokemon TCG sets..."):
-                all_sets = fetch_sets_safely()
+            with st.spinner("🔄 Loading Pokemon TCG sets..."):
+                all_sets = fetch_sets_optimized()
                 
                 if all_sets is not None:
-                    all_sets = all_sets[::-1]  # Reverse the order for display
-                    sets_data = all_sets[["id", "name", "images"]]
+                    # Reverse order for newest first
+                    all_sets = all_sets[::-1]
                     
-                    # Apply image conversion
-                    imaged_set = image_conversion_set(sets_data)
-                    st.session_state.sets_data = imaged_set
+                    # Select required columns
+                    sets_data = all_sets[["id", "name", "logo", "symbol"]].copy()
+                    st.session_state.sets_data = sets_data
+                    
+                    st.success(f"🎉 Successfully loaded {len(sets_data)} Pokemon TCG sets!")
                 else:
-                    st.error("Failed to load sets data. Please refresh the page to try again.")
+                    st.error("❌ Failed to load sets data. Please refresh the page to try again.")
                     return
         
-        # Display the set selection grid if data is loaded
+        # Display set selection grid
         if st.session_state.sets_data is not None:
             selected_set = select_set(st.session_state.sets_data)
             
-            # Show set details if a set is selected
+            # Handle set selection with live API calls
             if selected_set:
-                # Display the cards
                 handle_set_selection(selected_set)
     
     with tab2:
         st.markdown("""
-        # PokeAI: Your Pokemon TCG Assistant
+        ### 🤖 PokeAI: Your Pokemon TCG Assistant
         
-        Ask any of the following:
-        - "What is the total cost of [Set]?"
-        - "What are the top 10 most expensive card in [Set]?"
-        - "What are all the cards in [Set]?"
-        - "What are all the cards for [Pokemon]?"
+        **Ask me anything about Pokemon cards:**
+        - 💰 *"What is the total cost of Base Set?"*
+        - 🏆 *"What are the top 10 most expensive cards in Jungle?"*
+        - 📦 *"Show me all cards in Team Rocket set"*
+        - 🔍 *"Find all Pikachu cards"*
         """)
-        user_message = st.text_area("Your message:", height=100)
+        
+        user_message = st.text_area(
+            "Your question:", 
+            height=100,
+            placeholder="Ask about Pokemon cards, sets, or prices..."
+        )
 
-        if st.button("Send"):
-            if not user_message:
-                st.error("Please enter a message.")
+        if st.button("🚀 Send", help="Submit your question to PokeAI"):
+            if not user_message.strip():
+                st.error("Please enter a question.")
             else:
-                with st.spinner("Getting response..."):
+                # AI processing with progress
+                with st.spinner("🤖 PokeAI is analyzing your request..."):
                     ai_response = ai_chat(user_message)
-                    st.markdown("### Response:")
-                    parse_output(ai_response)
+                
+                st.markdown("### 🎉 PokeAI Response:")
+                parse_output(ai_response)
     
-    # Add a footer
+    # Footer with performance info
     st.markdown("---")
-    st.markdown("Powered by Pokémon TCG API")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown("🚀 **Optimized Performance**")
+        st.caption("Concurrent API calls & smart caching")
+    with col2:
+        st.markdown("📊 **Real-time Data**")
+        st.caption("Live API calls with progress tracking")
+    with col3:
+        st.markdown("🃏 **Powered by Pokémon TCG API**")
+        st.caption("Official data source")
 
-# Run the app
 if __name__ == "__main__":
     main()
