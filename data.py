@@ -18,6 +18,7 @@ import concurrent.futures
 import threading
 import asyncio
 from typing import Optional, Dict, List
+from datetime import datetime, timedelta
 
 # Set page config
 st.set_page_config(
@@ -25,6 +26,26 @@ st.set_page_config(
     page_icon="🃏",
     layout="wide"
 )
+
+# ============================================================
+# KEEP-ALIVE: Auto-refresh every 4 hours ONLY when idle
+# ============================================================
+from streamlit_autorefresh import st_autorefresh
+
+# Initialize last interaction time
+if 'last_interaction' not in st.session_state:
+    st.session_state.last_interaction = datetime.now()
+
+# Check if app has been idle for 30+ minutes before enabling auto-refresh
+idle_time = datetime.now() - st.session_state.last_interaction
+if idle_time > timedelta(minutes=30):
+    # Auto-refresh every 4 hours (14400000 ms) to prevent Streamlit sleep
+    st_autorefresh(interval=14400000, key="keepalive")
+
+# Helper function to mark user activity (call this on user interactions)
+def mark_user_active():
+    st.session_state.last_interaction = datetime.now()
+# ============================================================
 
 # App title and description
 st.title("Pokemon TCG Sets Explorer")
@@ -343,6 +364,10 @@ def select_set(sets_data):
     # Add search functionality for sets
     search_term = st.text_input("🔍 Search sets:", placeholder="Type to filter sets...")
     
+    # Mark user as active when they search
+    if search_term:
+        mark_user_active()
+    
     # Filter sets based on search
     if search_term:
         filtered_sets = sets_data[
@@ -382,8 +407,9 @@ def select_set(sets_data):
                     """, unsafe_allow_html=True)
                     
                     if st.button(f"📋 Select", key=f"set_{set_data['id']}", help=f"Load cards from {set_data['name']}"):
+                        mark_user_active()  # Mark user as active on button click
                         st.session_state.selected_set = set_data['name']
-                        st.info("📜 **Set selected!** Please scroll down to view all cards from this set.")
+                        st.session_state.scroll_to_cards = True  # Flag to trigger scroll
                         st.rerun()
     
     return st.session_state.selected_set
@@ -462,6 +488,14 @@ def display_cards(set_name: str, cards_data: pd.DataFrame):
 # OPTIMIZED: Set selection handler with live calls
 def handle_set_selection(selected_set: str):
     """Handle set selection with live API calls and progress tracking"""
+    
+    should_scroll = st.session_state.get('scroll_to_cards', False)
+    
+    # Show a brief toast-style notification
+    if should_scroll:
+        st.toast(f"📜 Loading {selected_set}...", icon="⬇️")
+        st.session_state.scroll_to_cards = False  # Reset flag
+    
     st.markdown('<div id="cards-section"></div>', unsafe_allow_html=True)
     
     # Make live API call (no caching for real-time data)
@@ -469,11 +503,29 @@ def handle_set_selection(selected_set: str):
     
     if not cards_data.empty:
         display_cards(selected_set, cards_data)
+        
+        # Scroll after cards are displayed
+        if should_scroll:
+            import streamlit.components.v1 as components
+            components.html(
+                """
+                <script>
+                    setTimeout(function() {
+                        const cardsSection = window.parent.document.getElementById('cards-section');
+                        if (cardsSection) {
+                            cardsSection.scrollIntoView({behavior: 'smooth', block: 'start'});
+                        }
+                    }, 200);
+                </script>
+                """,
+                height=0,
+            )
     else:
         st.error(f"❌ Failed to load cards for {selected_set}. Please try again.")
 
 # AI chat function (optimized with faster timeout)
 def ai_chat(prompt):
+    mark_user_active()  # Mark user as active when they use the chatbot
     API_KEY = get_api_key_chatbot()
 
     formatted_prompt = f"""
@@ -722,6 +774,7 @@ def main():
         )
 
         if st.button("🚀 Send", help="Submit your question to PokeAI"):
+            mark_user_active()  # Mark user as active on button click
             if not user_message.strip():
                 st.error("Please enter a question.")
             else:
