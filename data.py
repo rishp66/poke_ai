@@ -111,65 +111,79 @@ def fetch_all_sets():
 # DATA FETCHING — CARDS BY SET
 # ============================================================
 def fetch_set_cards(set_code: str, set_id: str = None) -> pd.DataFrame:
-    """Fetch all cards in a set from PokéWallet with pagination."""
-    all_cards = []
-    identifier = set_code if set_code else set_id
-    if not identifier:
+    """Fetch all cards in a set from PokéWallet with pagination.
+    Tries set_code first, then falls back to set_id."""
+
+    # Build ordered list of identifiers to try
+    identifiers = []
+    if set_code:
+        identifiers.append(set_code)
+    if set_id and set_id != set_code:
+        identifiers.append(set_id)
+    if not identifiers:
         return pd.DataFrame()
 
-    page = 1
-    limit = 200  # max per page
+    limit = 200
 
-    try:
-        while True:
-            def _fetch(p=page):
-                resp = requests.get(
-                    f"{POKEWALLET_BASE_URL}/sets/{identifier}",
-                    headers=_pw_headers(),
-                    params={"page": p, "limit": limit},
-                    timeout=30,
+    for identifier in identifiers:
+        all_cards = []
+        set_info = {}
+        page = 1
+
+        try:
+            while True:
+                def _fetch(p=page, ident=identifier):
+                    resp = requests.get(
+                        f"{POKEWALLET_BASE_URL}/sets/{ident}",
+                        headers=_pw_headers(),
+                        params={"page": p, "limit": limit},
+                        timeout=30,
+                    )
+                    resp.raise_for_status()
+                    return resp.json()
+
+                data = retry_api_call(
+                    _fetch, max_retries=2, description=f"Fetching {identifier} p{page}"
                 )
-                resp.raise_for_status()
-                return resp.json()
+                if not data:
+                    break
 
-            data = retry_api_call(_fetch, description=f"Fetching set page {page}")
-            if not data:
-                break
+                cards_batch = data.get("cards", [])
+                set_info = data.get("set", {})
 
-            cards_batch = data.get("cards", [])
-            set_info = data.get("set", {})
+                if not cards_batch and page == 1:
+                    break  # No cards — try next identifier
 
-            # Enrich cards with set info
-            for card in cards_batch:
-                card['set_name'] = set_info.get('name', '')
-                card['set_code_val'] = set_info.get('set_code', identifier)
+                for card in cards_batch:
+                    card['set_name'] = set_info.get('name', '')
+                    card['set_code_val'] = set_info.get('set_code', identifier)
 
-            all_cards.extend(cards_batch)
+                all_cards.extend(cards_batch)
 
-            pagination = data.get("pagination", {})
-            total_pages = pagination.get("total_pages", 1)
-            if page >= total_pages:
-                break
-            page += 1
+                pagination = data.get("pagination", {})
+                total_pages = pagination.get("total_pages", 1)
+                if page >= total_pages:
+                    break
+                page += 1
 
-        if not all_cards:
-            return pd.DataFrame()
+        except Exception:
+            continue  # Try next identifier
 
-        df = pd.DataFrame(all_cards)
+        if all_cards:
+            df = pd.DataFrame(all_cards)
 
-        # Check if prices are empty — if so, try enriching via /search
-        df['_price'] = extract_price_series(df)
-        if df['_price'].sum() == 0:
-            set_name = set_info.get('name', '')
-            if set_name:
-                df = _enrich_prices_via_search(df, set_name)
-            df.drop(columns=['_price'], inplace=True, errors='ignore')
+            # Check if prices are empty — enrich via /search
+            df['_price'] = extract_price_series(df)
+            if df['_price'].sum() == 0:
+                sn = set_info.get('name', '')
+                if sn:
+                    df = _enrich_prices_via_search(df, sn)
+                df.drop(columns=['_price'], inplace=True, errors='ignore')
 
-        return df
+            return df
 
-    except Exception as e:
-        st.error(f"Error fetching set cards: {e}")
-        return pd.DataFrame()
+    # All identifiers failed — return empty
+    return pd.DataFrame()
 
 
 def _enrich_prices_via_search(df: pd.DataFrame, set_name: str) -> pd.DataFrame:
@@ -714,7 +728,7 @@ def handle_set_selection(set_name: str, set_code: str, set_id: str):
                 </script>
             """, height=0)
     else:
-        st.error(f"❌ No cards found for {set_name}. Try selecting a different set.")
+        st.error(f"❌ No cards found for {set_name}. This set may not have card data in PokéWallet yet (tried codes: {set_code}, {set_id}).")
 
 
 # ============================================================
@@ -745,7 +759,7 @@ def ai_chat(prompt):
     if not API_KEY:
         return "Chatbot API key not found."
 
-    MODEL = "meta-llama/llama-4-maverick:free"
+    MODEL = "meta-llama/llama-3.3-70b-instruct:free"
 
     try:
         response = requests.post(
