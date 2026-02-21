@@ -905,42 +905,37 @@ def main():
 
     with tab2:
         st.markdown("""
-        ### 🤖 PokeAI: Your Pokemon TCG Assistant
+        ### 🤖 PokeAI: Your Pokemon TCG Assistant - Coming Soon!
 
-        **Ask me anything about Pokemon cards:**
-        - 💰 *"What is the total cost of Darkness Ablaze?"*
-        - 🏆 *"What are the top 10 most expensive cards in Scarlet & Violet?"*
-        - 📦 *"Show me all cards in Silver Tempest"*
-        - 🔍 *"Find all Pikachu cards"*
         """)
 
-        user_message = st.text_area(
-            "Your question:",
-            height=100,
-            placeholder="Ask about Pokemon cards, sets, or prices..."
-        )
+    #     user_message = st.text_area(
+    #         "Your question:",
+    #         height=100,
+    #         placeholder="Ask about Pokemon cards, sets, or prices..."
+    #     )
 
-        if st.button("🚀 Send", help="Submit your question to PokeAI"):
-            mark_user_active()
-            if not user_message.strip():
-                st.error("Please enter a question.")
-            else:
-                with st.spinner("🤖 PokeAI is analyzing your request..."):
-                    ai_response = ai_chat(user_message)
-                st.markdown("### 🎉 PokeAI Response:")
-                parse_output(ai_response)
+    #     if st.button("🚀 Send", help="Submit your question to PokeAI"):
+    #         mark_user_active()
+    #         if not user_message.strip():
+    #             st.error("Please enter a question.")
+    #         else:
+    #             with st.spinner("🤖 PokeAI is analyzing your request..."):
+    #                 ai_response = ai_chat(user_message)
+    #             st.markdown("### 🎉 PokeAI Response:")
+    #             parse_output(ai_response)
 
-    st.markdown("---")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("🚀 **Reliable & Fast**")
-        st.caption("PokéWallet API with retry logic")
-    with col2:
-        st.markdown("📊 **Real-time Pricing**")
-        st.caption("TCGPlayer & CardMarket data")
-    with col3:
-        st.markdown("🃏 **Powered by PokéWallet**")
-        st.caption("50,000+ cards database")
+    # st.markdown("---")
+    # col1, col2, col3 = st.columns(3)
+    # with col1:
+    #     st.markdown("🚀 **Reliable & Fast**")
+    #     st.caption("PokéWallet API with retry logic")
+    # with col2:
+    #     st.markdown("📊 **Real-time Pricing**")
+    #     st.caption("TCGPlayer & CardMarket data")
+    # with col3:
+    #     st.markdown("🃏 **Powered by PokéWallet**")
+    #     st.caption("50,000+ cards database")
 
 
 if __name__ == "__main__":
