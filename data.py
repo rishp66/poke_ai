@@ -878,7 +878,17 @@ def main():
             with st.spinner("🔄 Loading Pokemon TCG sets from PokéWallet..."):
                 all_sets = fetch_all_sets()
                 if all_sets is not None and not all_sets.empty:
-                    st.session_state.sets_data = all_sets[::-1].reset_index(drop=True)
+                    # Sort by release_date descending (most recent first)
+                    if 'release_date' in all_sets.columns:
+                        all_sets['_sort_date'] = pd.to_datetime(
+                            all_sets['release_date'], errors='coerce'
+                        )
+                        all_sets = all_sets.sort_values(
+                            '_sort_date', ascending=False, na_position='last'
+                        ).drop(columns=['_sort_date']).reset_index(drop=True)
+                    else:
+                        all_sets = all_sets[::-1].reset_index(drop=True)
+                    st.session_state.sets_data = all_sets
                     st.success(f"🎉 Successfully loaded {len(all_sets)} Pokemon TCG sets!")
                 else:
                     st.error("❌ Failed to load sets. Please check your API key and refresh.")
