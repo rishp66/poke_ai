@@ -11,17 +11,8 @@ A Streamlit web app for exploring Pokemon Trading Card Game sets, viewing card c
 - **Browse All Sets** - View all Pokemon TCG sets with logos, sorted newest first
 - **Search Sets** - Filter sets by name or ID
 - **View Complete Card Lists** - See all cards in any set with images and pricing
-- **Market Prices** - Real-time pricing data from TCGPlayer (holofoil, reverse holo, normal)
+- **Market Prices** - Real-time pricing data from TCGPlayer
 - **Set Statistics** - Total cards, estimated value, and average card price
-- **PokeAI Assistant** - AI chatbot to help find cards and analyze sets
-
-## PokeAI Commands
-
-Ask the AI assistant questions like:
-- *"What is the total cost of Base Set?"*
-- *"What are the top 10 most expensive cards in Jungle?"*
-- *"Show me all cards in Team Rocket set"*
-- *"Find all Pikachu cards"*
 
 ## Installation
 
@@ -41,11 +32,9 @@ Ask the AI assistant questions like:
    Create a `.streamlit/secrets.toml` file:
    ```toml
    POKEMONTCG_IO_API_KEY = "your-pokemon-tcg-api-key"
-   CHATBOT_API_KEY = "your-openrouter-api-key"
    ```
 
-   - Get a Pokemon TCG API key at [pokemontcg.io](https://pokemontcg.io/)
-   - Get an OpenRouter API key at [openrouter.ai](https://openrouter.ai/)
+   - Get a Pokemon TCG API key at [pokewallet.io](https://www.pokewallet.io/)
 
 4. **Run the app**
    ```bash
@@ -71,8 +60,6 @@ streamlit-autorefresh
 3. Add your API keys in the Streamlit Cloud secrets management
 4. Deploy!
 
-The app includes a keep-alive feature that auto-refreshes every 4 hours when idle to prevent Streamlit Cloud from putting it to sleep.
-
 ## Project Structure
 
 ```
@@ -86,7 +73,7 @@ The app includes a keep-alive feature that auto-refreshes every 4 hours when idl
 ## API Usage
 
 This app uses:
-- **[Pokemon TCG API](https://pokemontcg.io/)** - Card and set data
+- **[Pokemon TCG Wallet API](https://www.pokewallet.io/)** - Card and set data
 - **[TCGPlayer](https://www.tcgplayer.com/)** - Market pricing (via Pokemon TCG API)
 - **[OpenRouter](https://openrouter.ai/)** - AI chat (Llama 4 Maverick)
 
@@ -107,4 +94,4 @@ Pull requests welcome! Feel free to open an issue for bugs or feature requests.
 
 ---
 
-Built with ❤️ using [Streamlit](https://streamlit.io/) and the [Pokemon TCG API](https://pokemontcg.io/)
+Built with ❤️ using [Streamlit](https://streamlit.io/) and the [Pokemon TCG Wallet API]((https://www.pokewallet.io/))
