@@ -2,6 +2,8 @@
 
 A Streamlit web app for exploring Pokemon Trading Card Game sets, viewing card collections, and checking market prices with an AI-powered assistant.
 
+[**View The App Here!**](https://poketcgai.streamlit.app/)
+
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.28+-red.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
