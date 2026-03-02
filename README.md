@@ -75,7 +75,6 @@ streamlit-autorefresh
 This app uses:
 - **[Pokemon TCG Wallet API](https://www.pokewallet.io/)** - Card and set data
 - **[TCGPlayer](https://www.tcgplayer.com/)** - Market pricing (via Pokemon TCG API)
-- **[OpenRouter](https://openrouter.ai/)** - AI chat (Llama 4 Maverick)
 
 ## Performance Features
 
