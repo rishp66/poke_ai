@@ -4,6 +4,10 @@ A Streamlit web app for exploring Pokemon Trading Card Game sets, viewing card c
 
 ## [**View The App Here!**](https://poketcgai.streamlit.app/)
 
+```
+**Please note: Due to the policies of Streamlit Cloud, you may need to wake the app from inactivity!**
+```
+
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.28+-red.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
