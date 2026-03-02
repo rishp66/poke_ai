@@ -1,6 +1,6 @@
 # Pokemon TCG Sets Explorer 🃏
 
-A Streamlit web app for exploring Pokemon Trading Card Game sets, viewing card collections, and checking market prices with an AI-powered assistant.
+A Streamlit web app for exploring Pokemon Trading Card Game sets, viewing card collections, and checking market prices.
 
 ## [**View The App Here!**](https://poketcgai.streamlit.app/)
 
