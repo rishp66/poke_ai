@@ -1,3 +1,4 @@
 .env
 .toml
 .streamlit
+.DS_Store
